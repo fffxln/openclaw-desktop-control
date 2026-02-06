@@ -167,9 +167,10 @@ If compose modal closes unexpectedly:
 ## Generic Patterns
 
 ### Click a button by label
-1. Screenshot → ask vision: "Where is the button labeled [X]? Give coordinates."
-2. Click at returned coordinates
-3. Screenshot → verify the button action occurred
+1. Try accessibility first: `{baseDir}/scripts/desktop-control click-element --label "X"`
+2. If found and clicked → screenshot → verify
+3. If not found: screenshot → ask vision for coordinates → validate (Step 3.5) → click
+4. Screenshot → verify the button action occurred
 
 ### Fill a form field
 1. Screenshot → identify the field
@@ -223,9 +224,16 @@ Follow the Recovery Protocol from SKILL.md Step 5.5:
 ### CRITICAL: Navigation Safety
 WhatsApp's sidebar has densely packed icons that are extremely close to the chat list. The risk of misclicking Calls, Status, or other sidebar icons instead of a chat row is HIGH. See Danger Zones in SKILL.md.
 
-**Preferred approach: Use Cmd+F search to open chats instead of clicking chat rows.**
+**Preferred approach:** Use accessibility API or Cmd+F search to open chats instead of clicking chat rows.
 
-### Open a specific chat (SAFE method — use this)
+### Open a specific chat (BEST method — accessibility)
+1. Activate WhatsApp: `osascript -e 'tell application "WhatsApp" to activate'`
+2. Try to find the chat by label: `{baseDir}/scripts/desktop-control find-element --label "Contact Name" --app "WhatsApp"`
+3. If found: `{baseDir}/scripts/desktop-control click-element --label "Contact Name" --app "WhatsApp"`
+4. Screenshot → verify correct chat opened (check header name)
+5. If not found (Electron apps may have limited accessibility): fall back to Cmd+F method below
+
+### Open a specific chat (SAFE method — Cmd+F fallback)
 1. Activate WhatsApp: `osascript -e 'tell application "WhatsApp" to activate'`
 2. Press Cmd+F to open search
 3. Type the contact or group name
@@ -372,3 +380,169 @@ WhatsApp's search results view appears to have different click handling:
 3. Document what was tried for future improvement
 
 Don't burn tokens repeating the same failed approach.
+
+---
+
+## Vision Model Improvement Guide
+
+Vision coordinate estimates are inherently imprecise (10-50px off). The **primary solution** is the accessibility API (`find-element`, `click-element`, `get-element-frame`) which provides exact screen-point coordinates. Vision-based clicking is the last-resort fallback. This section documents how to improve it when accessibility isn't available.
+
+### Problem 1: Coordinate estimates are off by 10-50px
+
+**Primary fix:** Use accessibility API — `click-element --label "X"` or `get-element-frame --label "X"` for exact coordinates with zero estimation error.
+
+**When accessibility isn't available** (Electron apps, custom web UIs):
+
+**Better prompting approach:**
+```
+Instead of: "Where is the Post button? Give coordinates."
+
+Ask: "Look at the Post button. Give me:
+1. The bounding box (top-left x,y and bottom-right x,y) in image pixels
+2. The image dimensions
+3. Whether this is likely a Retina screenshot (2x)
+4. The recommended click point (accounting for any padding or visual offset)"
+```
+
+**Verification step — use accessibility:**
+```bash
+# Before clicking at vision-estimated coordinates, check what's there
+{baseDir}/scripts/desktop-control element-at-point --x <X> --y <Y>
+```
+If the element at that point doesn't match your target, adjust coordinates.
+
+### Problem 2: Can't tell if clicks register
+
+**Current approach:** Click → screenshot → ask "did it work?"
+
+**Better approach:** Before/after comparison
+```
+"Compare these two screenshots (before click and after click):
+1. What changed?
+2. Did the intended action occur (opening Laura's chat)?
+3. If not, what happened instead?
+4. What should we try differently?"
+```
+
+**State change detection prompts:**
+- "Is a different chat now open? Which one?"
+- "Did a dialog appear? What does it say?"
+- "Is the element I clicked now in a selected/active state?"
+
+### Problem 3: No understanding of focus/selection state
+
+**Primary fix:** Use accessibility API:
+```bash
+# Check what has focus right now
+{baseDir}/scripts/desktop-control get-focused-element
+
+# Check if a specific element is focused/enabled
+{baseDir}/scripts/desktop-control find-element --label "Search"
+# Returns: focused, enabled, role fields
+```
+
+**When accessibility isn't available**, ask vision:
+- "Which panel appears to have focus? (Look for: cursor, highlight, active styling)"
+- "Is there a modal or overlay blocking the main UI?"
+- "Is the target element currently interactive or grayed out/disabled?"
+
+**Focus indicators to look for:**
+- Blue highlight or selection ring
+- Cursor/text caret presence
+- Active/inactive window title bar styling
+- Modal overlay dimming the background
+
+### Problem 4: Different UI regions have different click behaviors
+
+**WhatsApp example:**
+- Chat list rows: Clickable anywhere on the row
+- Search results: May need to click specific sub-element
+- Sidebar icons: Small hit targets, easy to miss
+
+**Primary fix:** Use accessibility to discover clickable elements:
+```bash
+# See what elements exist in the search results area
+{baseDir}/scripts/desktop-control get-ui-tree --app "WhatsApp" --depth 4
+
+# Find the specific contact in results
+{baseDir}/scripts/desktop-control find-element --label "Contact Name" --app "WhatsApp"
+```
+
+**When accessibility isn't available**, ask vision:
+```
+"Looking at this search result for 'Contact Name':
+1. What are the distinct clickable elements within this row?
+2. Is there a 'Message' or 'Open chat' button?
+3. What happens if I click the profile picture vs the name vs the preview text?
+4. Is the entire row clickable or just specific parts?"
+```
+
+### Problem 5: Coordinate system confusion
+
+**The issue:** Screenshots are in image pixels, clicks are in screen coordinates.
+
+**Checklist for every coordinate calculation:**
+1. What are the screenshot dimensions? (e.g., 2940 x 1912)
+2. What are the actual screen dimensions? (e.g., 1470 x 956)
+3. What is the scale factor? (e.g., 2x Retina)
+4. Is the window full-screen or positioned somewhere?
+5. If windowed, what is the window's screen position?
+
+**Prompt for clarity:**
+```
+"The screenshot is [WIDTH] x [HEIGHT] pixels.
+The screen is [SCREEN_W] x [SCREEN_H] at scale factor [SCALE].
+Given the element at image coordinates (IMG_X, IMG_Y),
+what are the correct SCREEN coordinates to click?"
+```
+
+### Improved vision analysis workflow
+
+**Step 1: Understand the scene**
+```
+"Describe this screenshot:
+1. What app is this?
+2. What view/screen is showing?
+3. What is the currently active/focused element?
+4. Are there any modals, dialogs, or overlays?"
+```
+
+**Step 2: Locate the target**
+```
+"I need to click on [TARGET].
+1. Is it visible in this screenshot?
+2. Give me its bounding box (top-left and bottom-right corners)
+3. What is the recommended click point?
+4. Are there any elements nearby that could be accidentally clicked?"
+```
+
+**Step 3: Validate before clicking**
+```
+"I plan to click at screen coordinates (X, Y).
+1. What element is at that position?
+2. Is it my intended target?
+3. What is the nearest 'danger zone' element and how far away is it?"
+```
+
+**Step 4: Verify after clicking**
+```
+"Compare the before and after screenshots:
+1. What changed?
+2. Did the intended action succeed?
+3. If not, what happened instead and why?"
+```
+
+### Metrics to track for improvement
+
+For each click attempt, record:
+- Target element description
+- Vision-estimated coordinates
+- Actual click coordinates used
+- Success/failure
+- If failed: what was actually clicked (from after screenshot)
+- Coordinate error (estimated vs what would have worked)
+
+Over time, this data reveals:
+- Systematic biases in coordinate estimation
+- Which UI types are harder to click accurately
+- Whether certain prompt styles give better results

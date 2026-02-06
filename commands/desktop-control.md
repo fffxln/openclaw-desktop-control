@@ -58,6 +58,20 @@ PHASE 2 — LOCALIZATION:
 
 If CONFIDENCE is LOW or a danger zone is within 40px: use keyboard alternative. If none exists, take a region capture (`-R` flag) and re-analyze.
 
+### Accessibility Cross-Reference
+
+After vision analysis, use the accessibility API to get exact element positions:
+
+```bash
+# Find the target element by its label text
+{baseDir}/scripts/desktop-control find-element --label "Button Text" --role AXButton
+
+# Get exact screen-point coordinates (no Retina math needed)
+{baseDir}/scripts/desktop-control get-element-frame --label "Button Text"
+```
+
+If `find-element` returns a match, use its frame coordinates instead of vision estimates. If it returns no match (common in Electron apps), fall back to vision coordinates.
+
 ## Step 3.5: Validate (Pre-Click Safety)
 
 Before any click action, verify:
@@ -69,15 +83,37 @@ Before any click action, verify:
 
 If any check fails: use keyboard alternative or ask user.
 
+**Accessibility pre-click validation:** Before clicking at vision-estimated coordinates, verify what's actually at that point:
+```bash
+{baseDir}/scripts/desktop-control element-at-point --x 500 --y 300
+```
+If the element at that point doesn't match what you expect, do NOT click.
+
 ## Step 4: Act
 
 Execute exactly one action per cycle. Do not chain multiple actions without verifying each one.
 
 **Priority order (prefer higher):**
-1. **Keyboard shortcut** — no coordinate risk (Cmd+Enter, Escape, etc.)
-2. **Search/filter + keyboard** — type to find, Enter to select (Cmd+F, Spotlight)
-3. **Tab navigation** — Tab through elements, Enter to activate
-4. **Mouse click** — least preferred, should pass Step 3.5 validation first
+1. **Accessibility click** — click element by label, zero coordinate risk: `{baseDir}/scripts/desktop-control click-element --label "Send" --role AXButton`
+2. **Keyboard shortcut** — no coordinate risk (Cmd+Enter, Escape, etc.)
+3. **Search/filter + keyboard** — type to find, Enter to select (Cmd+F, Spotlight)
+4. **Accessibility frame + cliclick** — exact coordinates from `get-element-frame`, no Retina math needed
+5. **Tab navigation** — Tab through elements, Enter to activate
+6. **Vision-estimated click** — last resort, must pass Step 3.5 validation first
+
+### Accessibility (helper)
+
+```bash
+{baseDir}/scripts/desktop-control click-element --label "Send"              # click by label
+{baseDir}/scripts/desktop-control click-element --label "Post" --role AXButton  # click by label + role
+{baseDir}/scripts/desktop-control find-element --label "Chats"              # find element (returns JSON with frame)
+{baseDir}/scripts/desktop-control get-element-frame --label "Chats"         # get exact screen coordinates
+{baseDir}/scripts/desktop-control get-ui-tree --app "Finder" --depth 3      # dump accessibility tree
+{baseDir}/scripts/desktop-control get-focused-element                       # what has focus right now
+{baseDir}/scripts/desktop-control element-at-point --x 500 --y 300          # what's at these coordinates
+```
+
+Frame coordinates from accessibility commands are in screen points — they map directly to cliclick with no Retina division needed.
 
 ### Mouse (cliclick)
 
@@ -120,6 +156,7 @@ Take a screenshot after the action. Perform explicit state assertion:
 2. Is the target element in its expected post-action state?
 3. Did any unwanted changes occur? (wrong window, unexpected modal, wrong view)
 4. Is the correct app/view still active?
+5. **Focus check:** Use `{baseDir}/scripts/desktop-control get-focused-element` to verify focus landed on the expected element.
 
 **Classification:**
 - **SUCCESS** — all checks pass → proceed to Step 6
@@ -200,3 +237,6 @@ If all steps are complete → take a final verification screenshot, confirm to t
 | Screenshots are black | System Settings → Privacy & Security → Screen Recording → enable DesktopControlHelper |
 | Wrong window gets input | `osascript -e 'tell application "X" to activate'` before acting |
 | Retina coordinate mismatch | Use `get-scale-factor` and divide coordinates by that value |
+| `find-element` returns no match | Element may not be exposed to accessibility API (common in Electron apps). Fall back to vision coordinates |
+| `click-element` has no effect | App may not support AXPress action. Use `get-element-frame` + cliclick instead |
+| `get-ui-tree` is slow or empty | Reduce `--depth` or specify `--app`. Some apps have deep/sparse accessibility trees |

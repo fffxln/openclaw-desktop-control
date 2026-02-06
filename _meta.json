@@ -3,11 +3,16 @@
   "slug": "desktop-control",
   "displayName": "Desktop Control",
   "latest": {
-    "version": "1.1.0",
+    "version": "1.2.0",
     "publishedAt": "2026-02-06T00:00:00.000Z",
     "commit": "https://github.com/fffxln/openclaw-desktop-control"
   },
   "history": [
+    {
+      "version": "1.2.0",
+      "date": "2026-02-06",
+      "notes": "Accessibility API integration: 6 new commands (get-ui-tree, find-element, click-element, get-element-frame, get-focused-element, element-at-point) for zero-coordinate element interaction. Hybrid vision + accessibility workflow with accessibility-first action priority. Vision coordinates are now last-resort fallback."
+    },
     {
       "version": "1.1.0",
       "date": "2026-02-06",

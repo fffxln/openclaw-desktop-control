@@ -80,6 +80,27 @@ PHASE 2 — LOCALIZATION (only after completing Phase 1):
 10. RECOMMENDED ACTION: State the single best next action. If confidence is LOW or a danger zone is nearby, RECOMMEND the keyboard alternative from #9 instead.
 ```
 
+**Phase 1.5 — Accessibility Cross-Reference:**
+
+After vision analysis, use the accessibility API to find the target element's exact position:
+
+```bash
+# Find element by label (case-insensitive substring match)
+{baseDir}/scripts/desktop-control find-element --label "Button Text" --role AXButton
+
+# Get exact screen-point frame (no Retina math needed)
+{baseDir}/scripts/desktop-control get-element-frame --label "Button Text"
+```
+
+If `find-element` returns a match with `"found": true`, use its `frame` and `center` coordinates instead of vision estimates — they are exact screen points that map directly to cliclick.
+
+If `find-element` returns `"found": false` (common in Electron apps like WhatsApp, Slack, VS Code), fall back to vision coordinates with full validation in Step 3.5.
+
+To explore what accessibility labels are available in the current app:
+```bash
+{baseDir}/scripts/desktop-control get-ui-tree --app "AppName" --depth 3
+```
+
 **Decision rules after analysis:**
 - If CONFIDENCE is LOW: Strongly prefer the keyboard alternative. If none exists, take a closer screenshot (region capture with `-R` flag) and re-analyze.
 - If CONFIDENCE is MEDIUM and a danger zone is within 40px: Strongly prefer the keyboard alternative.
@@ -107,17 +128,25 @@ Before executing ANY click action, perform this validation. Skip this step only 
 
 5. **DANGER ZONE CLEARANCE:** Compute the pixel distance from the click coordinate to every danger zone element for this app (see [Danger Zones](#danger-zones)). If any distance is < 30px → ABORT the click and use keyboard alternative.
 
-**If validation fails on any check:** Do NOT click. Use a keyboard shortcut, search, or tab-based navigation to reach the target. If no alternative exists, inform the user of the risk and ask for confirmation.
+6. **ACCESSIBILITY VERIFICATION:** If accessibility API is available for this element, verify what's at the click point:
+   ```bash
+   {baseDir}/scripts/desktop-control element-at-point --x <Xc> --y <Yc>
+   ```
+   If the element at that point doesn't match the intended target → ABORT and use `click-element` instead.
+
+**If validation fails on any check:** Do NOT click. Use accessibility click (`click-element --label "X"`), a keyboard shortcut, search, or tab-based navigation to reach the target. If no alternative exists, inform the user of the risk and ask for confirmation.
 
 ### Step 4: Act
 
 Execute exactly one action per cycle. Do not chain multiple actions without verifying each one.
 
 **Action priority (prefer higher over lower):**
-1. **Keyboard shortcut** — fastest, no coordinate risk (e.g., Cmd+Enter to submit, Escape to dismiss)
-2. **Search/filter + keyboard** — type to find element, then Enter to select (e.g., Spotlight, app search bars, Cmd+K palettes)
-3. **Tab navigation** — Tab/Shift+Tab through focusable elements, Enter to activate
-4. **Mouse click** — least preferred, should pass Step 3.5 validation first
+1. **Accessibility click** — click element by label/role, zero coordinate risk: `{baseDir}/scripts/desktop-control click-element --label "Send" --role AXButton`. Uses AXPress action; falls back to CGEvent click at frame center if AXPress is unsupported.
+2. **Keyboard shortcut** — fastest keyboard-based option, no coordinate risk (e.g., Cmd+Enter to submit, Escape to dismiss)
+3. **Search/filter + keyboard** — type to find element, then Enter to select (e.g., Spotlight, app search bars, Cmd+K palettes)
+4. **Accessibility frame + cliclick** — get exact screen-point coordinates from `get-element-frame`, then click with cliclick. No Retina division needed since accessibility frames are already in screen points.
+5. **Tab navigation** — Tab/Shift+Tab through focusable elements, Enter to activate
+6. **Vision-estimated click** — last resort. Must pass full Step 3.5 validation. Use only when accessibility returns no match and no keyboard alternative exists.
 
 #### Mouse (cliclick)
 
@@ -147,6 +176,40 @@ Execute exactly one action per cycle. Do not chain multiple actions without veri
 {baseDir}/scripts/desktop-control cliclick kd:cmd kp:q ku:cmd     # Cmd+Q
 {baseDir}/scripts/desktop-control cliclick kd:cmd kp:space ku:cmd # Spotlight
 ```
+
+#### Accessibility (helper)
+
+Use the macOS Accessibility API to find and interact with UI elements by label/role instead of coordinates.
+
+```bash
+# Click element by label (tries AXPress, falls back to CGEvent at frame center)
+{baseDir}/scripts/desktop-control click-element --label "Send"
+{baseDir}/scripts/desktop-control click-element --label "Post" --role AXButton
+
+# Find element — returns JSON with role, label, frame, enabled, focused, clickable
+{baseDir}/scripts/desktop-control find-element --label "Chats"
+{baseDir}/scripts/desktop-control find-element --label "Search" --role AXTextField --app "WhatsApp"
+
+# Get exact screen-point coordinates for an element
+{baseDir}/scripts/desktop-control get-element-frame --label "Chats"
+
+# Dump the accessibility tree (useful for discovering available labels)
+{baseDir}/scripts/desktop-control get-ui-tree --app "Finder" --depth 3
+
+# Check what has keyboard/accessibility focus
+{baseDir}/scripts/desktop-control get-focused-element
+
+# Check what element is at specific screen coordinates (pre-click validation)
+{baseDir}/scripts/desktop-control element-at-point --x 500 --y 300
+```
+
+**Key details:**
+- Frame coordinates are in **screen points** — they map directly to cliclick with no Retina scaling needed
+- `--label` matching is case-insensitive substring
+- `--role` filter is optional: common roles include `AXButton`, `AXTextField`, `AXStaticText`, `AXLink`, `AXMenuItem`
+- `find-element` returns up to 10 matches with a 5-second timeout
+- Electron apps (WhatsApp, Slack, VS Code) may have limited or missing accessibility trees — always have a fallback plan
+- All commands output JSON for structured parsing
 
 #### App control (AppleScript)
 
@@ -178,6 +241,7 @@ Take another screenshot immediately after the action. Perform a **state assertio
 2. **ELEMENT VERIFICATION:** Is the element you interacted with now in its expected post-action state? (button appears pressed, menu is open, text field contains the typed text, correct view is now active)
 3. **UNWANTED CHANGES:** Did anything change that should NOT have changed? (different window came to front, a modal appeared, navigation changed to wrong view, a call was initiated)
 4. **APP STATE:** Is the foreground app still the correct one? Is the correct view/tab/screen still active?
+5. **FOCUS CHECK:** Use `{baseDir}/scripts/desktop-control get-focused-element` to verify that focus landed on the expected element (e.g., the text field you clicked, the button you activated). This catches cases where a click appeared to work visually but focus went elsewhere.
 
 **Outcome classification:**
 - **SUCCESS**: All 4 checks pass → proceed to Step 6
@@ -351,3 +415,7 @@ For app-specific step-by-step recipes (Figma export, Finder navigation, System S
 | Wrong window gets input | `osascript -e 'tell application "X" to activate'` before acting |
 | Retina coordinate mismatch | Run `{baseDir}/scripts/desktop-control get-scale-factor` and divide by that value |
 | App ignores keyboard input | Click inside the app window first to ensure focus, then type |
+| `find-element` returns no match | Element may not be exposed to accessibility API (common in Electron apps). Fall back to vision coordinates with full validation |
+| `click-element` clicks but nothing happens | App may not support AXPress. Use `get-element-frame` to get exact coordinates, then click with cliclick |
+| `get-ui-tree` returns empty or minimal tree | Reduce `--depth`, specify `--app`, or try after the app fully loads. Some apps expose limited accessibility trees |
+| Accessibility coordinates don't match screen | Ensure you're NOT dividing accessibility frame coordinates by the scale factor — they're already in screen points |

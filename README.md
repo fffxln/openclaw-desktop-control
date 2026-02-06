@@ -42,15 +42,15 @@ Add this repo's path to your `~/.openclaw/openclaw.json`:
 Plan -> Capture -> Analyze -> Validate -> Act -> Assert -> Recover (if needed) -> Repeat
 ```
 
-The skill uses a **vision-action loop** with built-in safety checks:
+The skill uses a **hybrid vision + accessibility** approach:
 
-1. **Analyze** — Two-phase structured analysis: first understand the scene (regions, danger zones, sensitive content), then localize the target element with a confidence rating
-2. **Validate** — Pre-click safety check: verify coordinates are in the right region, check adjacent elements, confirm Retina scaling, ensure clearance from danger zones
-3. **Act** — Keyboard-first: prefer shortcuts and search over mouse clicks. Clicking is a last resort and must pass validation
-4. **Assert** — Explicit state assertion against the expected outcome, not just "did something change"
-5. **Recover** — If something goes wrong, a 4-level escalation ladder (Escape → navigation shortcuts → app reset → user escalation)
+1. **Analyze** — Two-phase structured analysis with vision, then cross-reference with the macOS Accessibility API to get exact element positions
+2. **Validate** — Pre-click safety: verify coordinates, check adjacent elements, use `element-at-point` to confirm the target
+3. **Act** — Accessibility-first: click elements by label/role (zero coordinate risk), fall back to keyboard shortcuts, then vision-estimated coordinates as last resort
+4. **Assert** — Explicit state assertion with `get-focused-element` to verify focus landed correctly
+5. **Recover** — 4-level escalation ladder (Escape → navigation shortcuts → app reset → user escalation)
 
-**Keyboard-first principle:** Most documented misclick failures could have been avoided with keyboard shortcuts. The skill prefers `Cmd+F` over clicking chat rows, `Cmd+Enter` over clicking Post buttons, and `Escape` over clicking Cancel.
+**Why accessibility + vision?** Vision understands the scene (what's on screen, what to interact with). The Accessibility API performs the action (finds the exact element, clicks it by reference). Vision coordinate estimates are 10-50px off — accessibility coordinates are exact.
 
 **Why a helper app?**
 macOS requires Screen Recording and Accessibility permissions to be granted per-app. The helper runs as a proper `.app` bundle so it can receive its own TCC permissions, separate from Terminal or OpenClaw.
@@ -60,22 +60,30 @@ macOS requires Screen Recording and Accessibility permissions to be granted per-
 Always use the wrapper script:
 
 ```bash
+# Accessibility — click element by label (zero coordinate risk)
+scripts/desktop-control click-element --label "Send" --role AXButton
+
+# Accessibility — find element and get exact screen-point coordinates
+scripts/desktop-control find-element --label "Chats"
+scripts/desktop-control get-element-frame --label "Chats"
+
+# Accessibility — check what's at a point / what has focus
+scripts/desktop-control element-at-point --x 500 --y 300
+scripts/desktop-control get-focused-element
+
+# Accessibility — explore available elements
+scripts/desktop-control get-ui-tree --app "Finder" --depth 3
+
 # Screenshot
 scripts/desktop-control screencapture -x /tmp/screen.png
 
-# Click at coordinates
+# Mouse/keyboard (via cliclick)
 scripts/desktop-control cliclick c:500,300
-
-# Type text
 scripts/desktop-control cliclick t:"Hello world"
 
-# Get display scale factor (for Retina coordinate math)
+# Display and permissions
 scripts/desktop-control get-scale-factor
-
-# Check permissions
 scripts/desktop-control check-permissions
-
-# Request permissions
 scripts/desktop-control request-permission
 ```
 
@@ -85,7 +93,7 @@ See [SKILL.md](SKILL.md) for the complete workflow documentation and [patterns.m
 
 ```
 openclaw-desktop-control/
-├── src/helper.swift               # Swift CLI (ScreenCaptureKit + cliclick wrapper)
+├── src/helper.swift               # Swift CLI (ScreenCaptureKit + Accessibility API + cliclick)
 ├── scripts/
 │   ├── setup-wizard.sh            # Guided first-time setup
 │   ├── install.sh                 # Automated installation

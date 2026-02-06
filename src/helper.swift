@@ -30,6 +30,18 @@ func main() {
         requestPermissions()
     case "get-scale-factor":
         getScaleFactor(args: commandArgs)
+    case "get-ui-tree":
+        axGetUITree(args: commandArgs)
+    case "find-element":
+        axFindElement(args: commandArgs)
+    case "click-element":
+        axClickElement(args: commandArgs)
+    case "get-element-frame":
+        axGetElementFrame(args: commandArgs)
+    case "get-focused-element":
+        axGetFocusedElement(args: commandArgs)
+    case "element-at-point":
+        axElementAtPoint(args: commandArgs)
     case "help", "--help", "-h":
         printUsage()
         exit(0)
@@ -397,6 +409,406 @@ func getScaleFactor(args: [String]) {
     exit(0)
 }
 
+// MARK: - Accessibility Utilities
+
+/// Parse --flag value pairs from command arguments
+func parseAXArgs(_ args: [String]) -> [String: String] {
+    var result: [String: String] = [:]
+    var i = 0
+    while i < args.count {
+        if args[i].hasPrefix("--") && i + 1 < args.count {
+            let key = String(args[i].dropFirst(2))
+            result[key] = args[i + 1]
+            i += 2
+        } else {
+            i += 1
+        }
+    }
+    return result
+}
+
+/// Get AXUIElement for the frontmost application
+func axGetFrontmostApp() -> AXUIElement? {
+    guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+    return AXUIElementCreateApplication(app.processIdentifier)
+}
+
+/// Get AXUIElement for a named application
+func axGetAppByName(_ name: String) -> AXUIElement? {
+    let apps = NSWorkspace.shared.runningApplications
+    for app in apps {
+        if let appName = app.localizedName, appName.localizedCaseInsensitiveContains(name) {
+            return AXUIElementCreateApplication(app.processIdentifier)
+        }
+    }
+    return nil
+}
+
+/// Get app element from parsed args (--app flag or frontmost)
+func axGetAppElement(args: [String: String]) -> AXUIElement? {
+    if let appName = args["app"] {
+        return axGetAppByName(appName)
+    }
+    return axGetFrontmostApp()
+}
+
+/// Read a string attribute from an AXUIElement
+func axGetStringAttr(_ element: AXUIElement, _ attr: String) -> String? {
+    var ref: AnyObject?
+    guard AXUIElementCopyAttributeValue(element, attr as CFString, &ref) == .success else { return nil }
+    return ref as? String
+}
+
+/// Get element role
+func axGetRole(_ element: AXUIElement) -> String? {
+    axGetStringAttr(element, kAXRoleAttribute)
+}
+
+/// Get element label (tries title, then description, then value)
+func axGetLabel(_ element: AXUIElement) -> String? {
+    if let title = axGetStringAttr(element, kAXTitleAttribute), !title.isEmpty { return title }
+    if let desc = axGetStringAttr(element, kAXDescriptionAttribute), !desc.isEmpty { return desc }
+    if let val = axGetStringAttr(element, kAXValueAttribute), !val.isEmpty { return val }
+    return nil
+}
+
+/// Get element frame in screen points
+func axGetFrame(_ element: AXUIElement) -> CGRect? {
+    var posRef: AnyObject?
+    var sizeRef: AnyObject?
+    guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posRef) == .success,
+          AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef) == .success else {
+        return nil
+    }
+    var pos = CGPoint.zero
+    var size = CGSize.zero
+    AXValueGetValue(posRef as! AXValue, .cgPoint, &pos)
+    AXValueGetValue(sizeRef as! AXValue, .cgSize, &size)
+    return CGRect(origin: pos, size: size)
+}
+
+/// Check if element is enabled
+func axIsEnabled(_ element: AXUIElement) -> Bool {
+    var ref: AnyObject?
+    guard AXUIElementCopyAttributeValue(element, kAXEnabledAttribute as CFString, &ref) == .success else { return true }
+    return ref as? Bool ?? true
+}
+
+/// Check if element is focused
+func axIsFocused(_ element: AXUIElement) -> Bool {
+    var ref: AnyObject?
+    guard AXUIElementCopyAttributeValue(element, kAXFocusedAttribute as CFString, &ref) == .success else { return false }
+    return ref as? Bool ?? false
+}
+
+/// Get child elements
+func axGetChildren(_ element: AXUIElement) -> [AXUIElement] {
+    var ref: AnyObject?
+    guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &ref) == .success else { return [] }
+    return ref as? [AXUIElement] ?? []
+}
+
+/// Check if a role is clickable
+func axIsClickableRole(_ role: String?) -> Bool {
+    guard let role = role else { return false }
+    let clickableRoles = ["AXButton", "AXLink", "AXMenuItem", "AXPopUpButton",
+                          "AXCheckBox", "AXRadioButton", "AXTextField", "AXTextArea",
+                          "AXCell", "AXRow", "AXImage", "AXStaticText", "AXTab"]
+    return clickableRoles.contains(role)
+}
+
+/// Convert element to JSON dictionary
+func axElementToDict(_ element: AXUIElement, depth: Int, maxDepth: Int) -> [String: Any] {
+    var dict: [String: Any] = [:]
+    dict["role"] = axGetRole(element) ?? "Unknown"
+    if let label = axGetLabel(element) { dict["label"] = label }
+    if let frame = axGetFrame(element) {
+        dict["frame"] = ["x": Int(frame.minX), "y": Int(frame.minY),
+                         "w": Int(frame.width), "h": Int(frame.height)]
+    }
+    dict["enabled"] = axIsEnabled(element)
+    dict["focused"] = axIsFocused(element)
+
+    if depth < maxDepth {
+        let children = axGetChildren(element)
+        if !children.isEmpty {
+            dict["children"] = children.map { axElementToDict($0, depth: depth + 1, maxDepth: maxDepth) }
+        }
+    }
+    return dict
+}
+
+/// Print a dictionary as JSON to stdout
+func axPrintJSON(_ dict: [String: Any]) {
+    if let data = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]) {
+        print(String(data: data, encoding: .utf8)!)
+    }
+}
+
+/// Recursive search for elements matching label and optional role
+func axSearchTree(_ root: AXUIElement, label: String, role: String?, maxResults: Int = 10) -> [AXUIElement] {
+    var results: [AXUIElement] = []
+    axSearchTreeHelper(root, label: label, role: role, maxResults: maxResults, results: &results)
+    return results
+}
+
+private func axSearchTreeHelper(_ element: AXUIElement, label: String, role: String?, maxResults: Int, results: inout [AXUIElement]) {
+    if results.count >= maxResults { return }
+
+    // Check this element
+    if let elemLabel = axGetLabel(element), elemLabel.localizedCaseInsensitiveContains(label) {
+        if let role = role {
+            if axGetRole(element) == role {
+                results.append(element)
+            }
+        } else {
+            results.append(element)
+        }
+    }
+
+    // Recurse children
+    for child in axGetChildren(element) {
+        if results.count >= maxResults { return }
+        axSearchTreeHelper(child, label: label, role: role, maxResults: maxResults, results: &results)
+    }
+}
+
+// MARK: - Accessibility Commands
+
+func axGetUITree(args: [String]) {
+    guard checkAccessibility() else {
+        axPrintJSON(["error": "Accessibility permission not granted",
+                     "fix": "System Settings > Privacy & Security > Accessibility > Enable DesktopControlHelper"])
+        exit(1)
+    }
+
+    let parsed = parseAXArgs(args)
+    let maxDepth = Int(parsed["depth"] ?? "4") ?? 4
+
+    guard let app = axGetAppElement(args: parsed) else {
+        axPrintJSON(["error": "Could not find application", "app": parsed["app"] ?? "frontmost"])
+        exit(1)
+    }
+
+    let appName = axGetStringAttr(app, kAXTitleAttribute) ?? parsed["app"] ?? "Unknown"
+    let tree = axElementToDict(app, depth: 0, maxDepth: maxDepth)
+    axPrintJSON(["app": appName, "tree": tree])
+    exit(0)
+}
+
+func axFindElement(args: [String]) {
+    guard checkAccessibility() else {
+        axPrintJSON(["error": "Accessibility permission not granted"])
+        exit(1)
+    }
+
+    let parsed = parseAXArgs(args)
+    guard let label = parsed["label"] else {
+        axPrintJSON(["error": "Missing required --label argument"])
+        exit(1)
+    }
+
+    guard let app = axGetAppElement(args: parsed) else {
+        axPrintJSON(["error": "Could not find application", "found": false])
+        exit(1)
+    }
+
+    let results = axSearchTree(app, label: label, role: parsed["role"])
+    if results.isEmpty {
+        axPrintJSON(["found": false, "label": label, "matchCount": 0,
+                     "error": "No element matching label '\(label)' found"])
+        exit(0)
+    }
+
+    let element = results[0]
+    var dict: [String: Any] = ["found": true, "matchCount": results.count]
+    dict["role"] = axGetRole(element) ?? "Unknown"
+    dict["label"] = axGetLabel(element) ?? label
+    if let frame = axGetFrame(element) {
+        dict["frame"] = ["x": Int(frame.minX), "y": Int(frame.minY),
+                         "w": Int(frame.width), "h": Int(frame.height)]
+        dict["center"] = ["x": Int(frame.midX), "y": Int(frame.midY)]
+    }
+    dict["enabled"] = axIsEnabled(element)
+    dict["focused"] = axIsFocused(element)
+    dict["clickable"] = axIsClickableRole(axGetRole(element))
+    axPrintJSON(dict)
+    exit(0)
+}
+
+func axClickElement(args: [String]) {
+    guard checkAccessibility() else {
+        axPrintJSON(["error": "Accessibility permission not granted"])
+        exit(1)
+    }
+
+    let parsed = parseAXArgs(args)
+    guard let label = parsed["label"] else {
+        axPrintJSON(["error": "Missing required --label argument"])
+        exit(1)
+    }
+
+    guard let app = axGetAppElement(args: parsed) else {
+        axPrintJSON(["error": "Could not find application", "success": false])
+        exit(1)
+    }
+
+    let results = axSearchTree(app, label: label, role: parsed["role"])
+    if results.isEmpty {
+        axPrintJSON(["success": false, "error": "No element matching label '\(label)' found"])
+        exit(1)
+    }
+
+    let element = results[0]
+    var resultDict: [String: Any] = [:]
+    resultDict["role"] = axGetRole(element) ?? "Unknown"
+    resultDict["label"] = axGetLabel(element) ?? label
+    if let frame = axGetFrame(element) {
+        resultDict["frame"] = ["x": Int(frame.minX), "y": Int(frame.minY),
+                               "w": Int(frame.width), "h": Int(frame.height)]
+    }
+
+    // Try AXPress first
+    let pressResult = AXUIElementPerformAction(element, kAXPressAction as CFString)
+    if pressResult == .success {
+        resultDict["success"] = true
+        resultDict["action"] = "AXPress"
+        axPrintJSON(resultDict)
+        exit(0)
+    }
+
+    // Fallback: CGEvent click at frame center
+    if let frame = axGetFrame(element) {
+        let centerX = frame.midX
+        let centerY = frame.midY
+
+        let mouseDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                                mouseCursorPosition: CGPoint(x: centerX, y: centerY), mouseButton: .left)
+        let mouseUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                              mouseCursorPosition: CGPoint(x: centerX, y: centerY), mouseButton: .left)
+        mouseDown?.post(tap: .cghidEventTap)
+        usleep(50000) // 50ms
+        mouseUp?.post(tap: .cghidEventTap)
+
+        resultDict["success"] = true
+        resultDict["action"] = "CGEvent-click"
+        resultDict["clickedAt"] = ["x": Int(centerX), "y": Int(centerY)]
+        axPrintJSON(resultDict)
+        exit(0)
+    }
+
+    resultDict["success"] = false
+    resultDict["error"] = "AXPress failed and no frame available for fallback click"
+    axPrintJSON(resultDict)
+    exit(1)
+}
+
+func axGetElementFrame(args: [String]) {
+    guard checkAccessibility() else {
+        axPrintJSON(["error": "Accessibility permission not granted"])
+        exit(1)
+    }
+
+    let parsed = parseAXArgs(args)
+    guard let label = parsed["label"] else {
+        axPrintJSON(["error": "Missing required --label argument"])
+        exit(1)
+    }
+
+    guard let app = axGetAppElement(args: parsed) else {
+        axPrintJSON(["error": "Could not find application", "found": false])
+        exit(1)
+    }
+
+    let results = axSearchTree(app, label: label, role: parsed["role"])
+    if results.isEmpty {
+        axPrintJSON(["found": false, "error": "No element matching label '\(label)' found"])
+        exit(0)
+    }
+
+    let element = results[0]
+    guard let frame = axGetFrame(element) else {
+        axPrintJSON(["found": true, "error": "Element found but has no frame"])
+        exit(0)
+    }
+
+    axPrintJSON([
+        "found": true,
+        "label": axGetLabel(element) ?? label,
+        "role": axGetRole(element) ?? "Unknown",
+        "frame": ["x": Int(frame.minX), "y": Int(frame.minY),
+                   "w": Int(frame.width), "h": Int(frame.height)],
+        "center": ["x": Int(frame.midX), "y": Int(frame.midY)]
+    ])
+    exit(0)
+}
+
+func axGetFocusedElement(args: [String]) {
+    guard checkAccessibility() else {
+        axPrintJSON(["error": "Accessibility permission not granted"])
+        exit(1)
+    }
+
+    let parsed = parseAXArgs(args)
+    guard let app = axGetAppElement(args: parsed) else {
+        axPrintJSON(["error": "Could not find application", "found": false])
+        exit(1)
+    }
+
+    var focusedRef: AnyObject?
+    guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success else {
+        axPrintJSON(["found": false, "error": "No focused element detected"])
+        exit(0)
+    }
+    let focused = focusedRef as! AXUIElement
+
+    var dict: [String: Any] = ["found": true]
+    dict["role"] = axGetRole(focused) ?? "Unknown"
+    if let label = axGetLabel(focused) { dict["label"] = label }
+    if let frame = axGetFrame(focused) {
+        dict["frame"] = ["x": Int(frame.minX), "y": Int(frame.minY),
+                         "w": Int(frame.width), "h": Int(frame.height)]
+    }
+    // Include value for text fields
+    if let value = axGetStringAttr(focused, kAXValueAttribute) { dict["value"] = value }
+    axPrintJSON(dict)
+    exit(0)
+}
+
+func axElementAtPoint(args: [String]) {
+    guard checkAccessibility() else {
+        axPrintJSON(["error": "Accessibility permission not granted"])
+        exit(1)
+    }
+
+    let parsed = parseAXArgs(args)
+    guard let xStr = parsed["x"], let yStr = parsed["y"],
+          let x = Float(xStr), let y = Float(yStr) else {
+        axPrintJSON(["error": "Missing required --x and --y arguments"])
+        exit(1)
+    }
+
+    let systemWide = AXUIElementCreateSystemWide()
+    var elementRef: AXUIElement?
+    let result = AXUIElementCopyElementAtPosition(systemWide, x, y, &elementRef)
+
+    guard result == .success, let element = elementRef else {
+        axPrintJSON(["found": false, "error": "No accessibility element at (\(Int(x)), \(Int(y)))"])
+        exit(0)
+    }
+
+    var dict: [String: Any] = ["found": true]
+    dict["role"] = axGetRole(element) ?? "Unknown"
+    if let label = axGetLabel(element) { dict["label"] = label }
+    if let frame = axGetFrame(element) {
+        dict["frame"] = ["x": Int(frame.minX), "y": Int(frame.minY),
+                         "w": Int(frame.width), "h": Int(frame.height)]
+    }
+    dict["point"] = ["x": Int(x), "y": Int(y)]
+    axPrintJSON(dict)
+    exit(0)
+}
+
 // MARK: - Usage
 
 func printUsage() {
@@ -412,6 +824,12 @@ func printUsage() {
       check-permissions       Verify Screen Recording and Accessibility permissions
       request-permission      Open System Settings to grant permissions
       get-scale-factor [-D n] Print the display's backing scale factor (1, 2, or 3)
+      get-ui-tree [flags]     Dump accessibility tree of frontmost/named app (JSON)
+      find-element [flags]    Find a UI element by label/role (JSON)
+      click-element [flags]   Click a UI element by label/role (zero-coordinate)
+      get-element-frame [fl]  Get exact screen-point frame of an element (JSON)
+      get-focused-element     Get the currently focused UI element (JSON)
+      element-at-point [fl]   Get what UI element is at given screen coordinates (JSON)
       help                    Show this help message
 
     Screencapture options:
@@ -420,13 +838,22 @@ func printUsage() {
       -R <x,y,w,h>            Capture specific region
       <output.png>            Output file path
 
+    Accessibility flags:
+      --label "text"          Element label to search for (required for find/click/frame)
+      --role "AXButton"       Filter by role (optional)
+      --app "AppName"         Target a specific app instead of frontmost (optional)
+      --depth N               Tree depth limit for get-ui-tree (default: 4)
+      --x N --y N             Screen point coordinates for element-at-point
+
     Examples:
       \(CommandLine.arguments[0]) screencapture -x /tmp/screen.png
-      \(CommandLine.arguments[0]) screencapture -D 1 /tmp/screen.png
-      \(CommandLine.arguments[0]) screencapture -R 0,0,800,600 /tmp/region.png
       \(CommandLine.arguments[0]) cliclick c:500,300
-      \(CommandLine.arguments[0]) check-permissions
-      \(CommandLine.arguments[0]) get-scale-factor
+      \(CommandLine.arguments[0]) get-ui-tree --app "WhatsApp" --depth 3
+      \(CommandLine.arguments[0]) find-element --label "Chats" --role "AXButton"
+      \(CommandLine.arguments[0]) click-element --label "Chats"
+      \(CommandLine.arguments[0]) get-element-frame --label "Send"
+      \(CommandLine.arguments[0]) get-focused-element
+      \(CommandLine.arguments[0]) element-at-point --x 500 --y 300
     """)
 }
 
