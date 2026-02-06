@@ -1,4 +1,4 @@
-# Desktop Control
+# OpenClaw Desktop Control
 
 macOS desktop automation through vision-action loops. Capture screenshots, analyze with Claude vision, and control mouse/keyboard via a TCC-compliant helper app.
 
@@ -12,18 +12,40 @@ macOS desktop automation through vision-action loops. Capture screenshots, analy
 
 **Guided setup (recommended):**
 ```bash
+git clone https://github.com/fffxln/openclaw-desktop-control.git
+cd openclaw-desktop-control
 bash scripts/setup-wizard.sh
 ```
 
-The wizard walks you through each step — installing the helper, granting permissions, and verifying everything works. No developer tools required.
-
-**Automatic (on first use):**
-The helper installs itself the first time OpenClaw uses the desktop-control skill. You'll be prompted to grant permissions in System Settings.
+The wizard walks you through each step -- installing the helper, granting permissions, and verifying everything works. No developer tools required.
 
 **Manual:**
 ```bash
 bash scripts/install.sh
 ```
+
+**As an OpenClaw skill:**
+Add this repo's path to your `~/.openclaw/openclaw.json`:
+```json
+{
+  "skills": {
+    "load": {
+      "extraDirs": ["/path/to/openclaw-desktop-control"]
+    }
+  }
+}
+```
+
+## How It Works
+
+```
+User request -> Plan -> Screenshot -> Vision analysis -> Action -> Verify -> Repeat
+```
+
+The skill uses a **vision-action loop**: it captures a screenshot, sends it to Claude for analysis, executes one action (click, type, navigate), then verifies the result with another screenshot. This continues until the task is complete.
+
+**Why a helper app?**
+macOS requires Screen Recording and Accessibility permissions to be granted per-app. The helper runs as a proper `.app` bundle so it can receive its own TCC permissions, separate from Terminal or OpenClaw.
 
 ## Usage
 
@@ -39,46 +61,40 @@ scripts/desktop-control cliclick c:500,300
 # Type text
 scripts/desktop-control cliclick t:"Hello world"
 
-# Get display scale factor
+# Get display scale factor (for Retina coordinate math)
 scripts/desktop-control get-scale-factor
 
 # Check permissions
 scripts/desktop-control check-permissions
+
+# Request permissions
+scripts/desktop-control request-permission
 ```
 
-## How It Works
+See [SKILL.md](SKILL.md) for the complete workflow documentation and [patterns.md](patterns.md) for app-specific automation recipes.
+
+## Project Structure
 
 ```
-User request → Plan → Screenshot → Vision analysis → Action → Verify → Repeat
-```
-
-The skill uses a **vision-action loop**: it captures a screenshot, sends it to Claude for analysis, executes one action (click, type, navigate), then verifies the result with another screenshot. This continues until the task is complete.
-
-**Why a helper app?**
-macOS requires Screen Recording and Accessibility permissions to be granted per-app. The helper runs as a proper `.app` bundle so it can receive its own TCC permissions, separate from Terminal or OpenClaw.
-
-## Architecture
-
-```
-skills/desktop-control/
-├── commands/desktop-control.md    # OpenClaw command definition
+openclaw-desktop-control/
 ├── src/helper.swift               # Swift CLI (ScreenCaptureKit + cliclick wrapper)
 ├── scripts/
 │   ├── setup-wizard.sh            # Guided first-time setup
 │   ├── install.sh                 # Automated installation
 │   ├── build.sh                   # Build from source (universal binary)
-│   └── desktop-control            # Wrapper script (main interface)
+│   └── desktop-control            # Wrapper script (main entry point)
 ├── bin/
 │   ├── DesktopControlHelper.app/  # Pre-built universal binary (arm64 + x86_64)
 │   └── cliclick                   # Bundled cliclick binary
 ├── SKILL.md                       # Complete workflow documentation
-├── _meta.json                     # Security metadata
-└── patterns.md                    # App-specific automation recipes
+├── _meta.json                     # Skill metadata and security review
+├── patterns.md                    # App-specific automation recipes
+└── setup_check.sh                 # Prerequisites verification
 ```
 
 ## Security
 
-**Verdict:** Conditional — requires security gates for sensitive apps.
+**Verdict:** Conditional -- requires security gates for sensitive apps.
 
 The skill stops and asks for your permission before interacting with:
 - Banking or financial apps
@@ -95,8 +111,9 @@ Screenshots are stored temporarily in `/tmp/` and deleted after each task.
 | Setup issues | Run: `bash scripts/setup-wizard.sh` |
 | Screenshots are black | Grant Screen Recording in System Settings |
 | Clicks don't work | Grant Accessibility in System Settings |
-| Wrong window gets input | The skill activates the target app first — if still wrong, try manually |
+| Wrong window gets input | The skill activates the target app first |
 | Coordinate mismatch | Run `scripts/desktop-control get-scale-factor` to check Retina scaling |
+| Full diagnostics | Run: `bash setup_check.sh` |
 
 ## Development
 
@@ -106,3 +123,7 @@ bash scripts/build.sh
 ```
 
 Produces a universal binary (arm64 + x86_64) signed with ad-hoc identity `ai.openclaw.desktop-control-helper`.
+
+## License
+
+[MIT](LICENSE)

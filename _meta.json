@@ -5,7 +5,7 @@
   "latest": {
     "version": "1.0.0",
     "publishedAt": "2026-02-06T00:00:00.000Z",
-    "commit": null
+    "commit": "https://github.com/fffxln/openclaw-desktop-control"
   },
   "history": [
     {
@@ -14,9 +14,8 @@
       "notes": "Initial release with TCC-compliant helper app, ScreenCaptureKit-based capture, dynamic Retina scaling, bundled cliclick, guided setup wizard"
     }
   ],
-  "source": "clawhub",
-  "custom": false,
-  "commands": ["desktop-control"],
+  "source": "custom",
+  "custom": true,
   "metadata": {
     "clawdbot": {
       "emoji": "🖥️",
