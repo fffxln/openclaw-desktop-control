@@ -1,13 +1,13 @@
 #!/bin/bash
 # Installation script for Desktop Control Helper
-# Copies the pre-built helper app and bundled cliclick to ~/.openclaw/bin/
+# Copies the pre-built helper app to /Applications/ and cliclick to ~/.openclaw/bin/
 # Falls back to building from source if pre-built binary is missing
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(dirname "$SCRIPT_DIR")"
-INSTALL_DIR="$HOME/.openclaw/bin"
+INSTALL_DIR="/Applications"
 APP_NAME="DesktopControlHelper"
 
 echo "📦 Installing Desktop Control Helper..."
@@ -22,8 +22,9 @@ if [ "$MAJOR" -lt 14 ]; then
     exit 1
 fi
 
-# Create installation directory
-mkdir -p "$INSTALL_DIR"
+# Create cliclick directory
+CLICLICK_DIR="$HOME/.openclaw/bin"
+mkdir -p "$CLICLICK_DIR"
 
 # Step 1: Install the helper app
 echo "1️⃣  Installing helper app..."
@@ -60,12 +61,12 @@ echo "2️⃣  Checking cliclick..."
 
 if command -v cliclick &> /dev/null; then
     echo "   ✅ cliclick found in PATH."
-elif [ -f "$INSTALL_DIR/cliclick" ]; then
-    echo "   ✅ cliclick found at $INSTALL_DIR/cliclick."
+elif [ -f "$CLICLICK_DIR/cliclick" ]; then
+    echo "   ✅ cliclick found at $CLICLICK_DIR/cliclick."
 elif [ -f "$SKILL_DIR/bin/cliclick" ]; then
-    cp "$SKILL_DIR/bin/cliclick" "$INSTALL_DIR/cliclick"
-    chmod +x "$INSTALL_DIR/cliclick"
-    echo "   ✅ Bundled cliclick installed to $INSTALL_DIR/cliclick."
+    cp "$SKILL_DIR/bin/cliclick" "$CLICLICK_DIR/cliclick"
+    chmod +x "$CLICLICK_DIR/cliclick"
+    echo "   ✅ Bundled cliclick installed to $CLICLICK_DIR/cliclick."
 else
     echo "   ⚠️  cliclick not found."
     echo "   cliclick is required for mouse and keyboard control."

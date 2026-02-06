@@ -98,3 +98,61 @@ osascript -e 'tell application "System Events" to scroll area 1 of front window 
 ```
 
 If the target element is not visible in the screenshot, try scrolling down and taking another screenshot.
+
+### Handle stuck dialogs/modals
+If a dialog won't close:
+1. Try `kp:esc` multiple times
+2. Try clicking outside the dialog (dimmed area)
+3. Try `kp:return` (might accept default action)
+4. If still stuck: ask user to manually close, OR quit and reopen the app:
+   ```bash
+   osascript -e 'tell application "APP_NAME" to quit'
+   sleep 1
+   osascript -e 'tell application "APP_NAME" to activate'
+   ```
+5. **Prevention:** Before clicking, verify coordinates are in the intended area (chat list vs sidebar icons vs other UI regions)
+
+## WhatsApp Desktop
+
+### Read unread messages
+1. Activate WhatsApp: `osascript -e 'tell application "WhatsApp" to activate'`
+2. Screenshot → identify the chat list on the left
+3. Look for: bold names, green badge numbers = unread
+4. Report unread chats to user
+
+### Open a specific chat
+**IMPORTANT:** WhatsApp has multiple clickable regions that can trigger unintended actions:
+- Left sidebar icons (Chats, Calls, Status, etc.) — y < 100 on Retina/2
+- Search bar — y ≈ 55-60
+- Chat list — y > 100, x < 200
+
+Steps:
+1. Screenshot → locate the chat row
+2. Calculate y-coordinate: first chat row starts around y=74 (screen coords), each row ~32px tall
+3. **Verify x-coordinate is within chat list** (x ≈ 100-180), NOT on sidebar icons (x < 40)
+4. Click on the chat row
+5. Screenshot → verify correct chat opened (check header name)
+6. If wrong view (Calls, Status): click Chats icon at top of sidebar (x≈17, y≈42)
+
+### Navigate back to Chats from Calls view
+1. Click the chat bubble icon in left sidebar (x≈17, y≈85 on Retina/2)
+2. If a dialog blocks: try Esc, click outside, or quit/reopen app
+
+### Error recovery
+If accidentally opened a dialog or wrong view:
+1. Press Escape multiple times
+2. Click the Chats icon (top of left sidebar, has badge count)
+3. If still stuck: ask user to close dialog manually
+
+## Lessons Learned (2026-02-06)
+
+### Coordinate precision matters
+- Retina displays: divide image coordinates by scale factor (usually 2)
+- Small UI elements (sidebar icons ~30px wide) are easy to miss
+- Verify click landed correctly with immediate screenshot
+
+### WhatsApp-specific gotchas
+- Sidebar icons are very close to chat list — easy to accidentally click Calls instead of a chat
+- "Create call link" dialog is modal and blocks all navigation
+- Search box is at y≈55, clicking there focuses search instead of selecting chat
+- Arrow keys navigate within current view, not across views

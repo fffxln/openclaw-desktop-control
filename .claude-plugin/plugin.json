@@ -1,0 +1,9 @@
+{
+  "name": "desktop-control",
+  "description": "macOS desktop automation through vision-action loops. Capture screenshots, analyze with Claude vision, and control mouse/keyboard via a TCC-compliant helper app.",
+  "version": "1.0.0",
+  "author": {
+    "name": "OpenClaw",
+    "email": "skills@openclaw.ai"
+  }
+}

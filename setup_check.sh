@@ -7,7 +7,7 @@ echo ""
 PASS=0
 FAIL=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HELPER="$HOME/.openclaw/bin/DesktopControlHelper.app/Contents/MacOS/helper"
+HELPER="/Applications/DesktopControlHelper.app/Contents/MacOS/helper"
 
 check() {
   if eval "$2" > /dev/null 2>&1; then
@@ -31,7 +31,7 @@ else
 fi
 
 # Core tools
-check "cliclick" "command -v cliclick || [ -f $HOME/.openclaw/bin/cliclick ]" "Run: bash $SCRIPT_DIR/scripts/setup-wizard.sh"
+check "cliclick" "command -v cliclick || [ -f $HOME/.openclaw/bin/cliclick ]" "Run: brew install cliclick"
 check "osascript" "which osascript" "Built into macOS — should always be present"
 
 # Check for Desktop Control Helper

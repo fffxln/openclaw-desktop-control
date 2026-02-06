@@ -6,9 +6,10 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(dirname "$SCRIPT_DIR")"
-INSTALL_DIR="$HOME/.openclaw/bin"
+INSTALL_DIR="/Applications"
 APP_NAME="DesktopControlHelper"
 HELPER="$INSTALL_DIR/$APP_NAME.app/Contents/MacOS/helper"
+CLICLICK_DIR="$HOME/.openclaw/bin"
 
 echo ""
 echo "🖥️  Desktop Control — Setup Wizard"
@@ -56,12 +57,13 @@ CLICLICK_OK=false
 if command -v cliclick &> /dev/null; then
     echo "✅ cliclick found in PATH."
     CLICLICK_OK=true
-elif [ -f "$INSTALL_DIR/cliclick" ]; then
-    echo "✅ cliclick found at $INSTALL_DIR/cliclick."
+elif [ -f "$CLICLICK_DIR/cliclick" ]; then
+    echo "✅ cliclick found at $CLICLICK_DIR/cliclick."
     CLICLICK_OK=true
 elif [ -f "$SKILL_DIR/bin/cliclick" ]; then
-    cp "$SKILL_DIR/bin/cliclick" "$INSTALL_DIR/cliclick"
-    chmod +x "$INSTALL_DIR/cliclick"
+    mkdir -p "$CLICLICK_DIR"
+    cp "$SKILL_DIR/bin/cliclick" "$CLICLICK_DIR/cliclick"
+    chmod +x "$CLICLICK_DIR/cliclick"
     echo "✅ Bundled cliclick installed."
     CLICLICK_OK=true
 fi

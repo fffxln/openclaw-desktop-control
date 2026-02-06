@@ -21,7 +21,7 @@
       "emoji": "🖥️",
       "requires": {
         "bins": ["cliclick"],
-        "helper": "~/.openclaw/bin/DesktopControlHelper.app"
+        "helper": "/Applications/DesktopControlHelper.app"
       },
       "os": ["darwin"],
       "minOS": "14.0"
