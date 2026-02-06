@@ -1,0 +1,21 @@
+#!/bin/bash
+# Desktop Control Wrapper
+# Automatically installs helper if missing, then routes commands to it
+
+HELPER="$HOME/.openclaw/bin/DesktopControlHelper.app/Contents/MacOS/helper"
+INSTALL_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install.sh"
+
+# Auto-install if helper not found
+if [ ! -f "$HELPER" ]; then
+    echo "🔧 Desktop Control Helper not found. Installing..."
+    bash "$INSTALL_SCRIPT"
+
+    # Verify installation succeeded
+    if [ ! -f "$HELPER" ]; then
+        echo "❌ Installation failed. Cannot proceed."
+        exit 1
+    fi
+fi
+
+# Route all commands to helper
+exec "$HELPER" "$@"

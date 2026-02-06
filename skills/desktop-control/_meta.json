@@ -1,0 +1,74 @@
+{
+  "owner": "openclaw",
+  "slug": "desktop-control",
+  "displayName": "Desktop Control",
+  "latest": {
+    "version": "1.0.0",
+    "publishedAt": "2026-02-06T00:00:00.000Z",
+    "commit": null
+  },
+  "history": [
+    {
+      "version": "1.0.0",
+      "date": "2026-02-06",
+      "notes": "Initial release with TCC-compliant helper app, ScreenCaptureKit-based capture, dynamic Retina scaling, bundled cliclick, guided setup wizard"
+    }
+  ],
+  "source": "clawhub",
+  "custom": false,
+  "commands": ["desktop-control"],
+  "metadata": {
+    "clawdbot": {
+      "emoji": "🖥️",
+      "requires": {
+        "bins": ["cliclick"],
+        "helper": "~/.openclaw/bin/DesktopControlHelper.app"
+      },
+      "os": ["darwin"],
+      "minOS": "14.0"
+    }
+  },
+  "securityReview": {
+    "reviewedAt": "2026-02-06",
+    "reviewedBy": "claude",
+    "verdict": "conditional",
+    "notes": "macOS-specific desktop automation skill requiring Screen Recording and Accessibility permissions. Uses vision-action loop to control GUI applications. Contains security gates for sensitive apps (banking, passwords). Helper app required for TCC permissions.",
+    "risks": [
+      {
+        "severity": "high",
+        "issue": "Screen Recording permission allows capturing all screen content including sensitive data"
+      },
+      {
+        "severity": "high",
+        "issue": "Accessibility permission allows mouse/keyboard control of any application"
+      },
+      {
+        "severity": "medium",
+        "issue": "Vision-action loop could be tricked into interacting with malicious dialogs"
+      },
+      {
+        "severity": "medium",
+        "issue": "Automated clicks could trigger unintended actions if screen state changes"
+      }
+    ],
+    "recommendations": [
+      "Always use security gates - stop and ask user before interacting with banking, password managers, or auth screens",
+      "Never skip verification step - always screenshot after action to confirm expected result",
+      "Limit to 3 retry attempts - prevent infinite loops on failure",
+      "Clean up screenshots - delete /tmp/pac_screen*.png after task completion",
+      "User approval required for sensitive operations - implement Step 1 Plan phase with explicit confirmation",
+      "Retina coordinate handling - use get-scale-factor command to get actual display scale"
+    ],
+    "permissions": [
+      "Screen Recording (macOS TCC)",
+      "Accessibility (macOS TCC)",
+      "Execute: screencapture, cliclick, osascript"
+    ],
+    "tools": [
+      "ScreenCaptureKit (native)",
+      "cliclick (bundled or brew install cliclick)",
+      "osascript (built-in)",
+      "DesktopControlHelper.app (auto-installed)"
+    ]
+  }
+}
