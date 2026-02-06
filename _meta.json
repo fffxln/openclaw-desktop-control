@@ -3,11 +3,16 @@
   "slug": "desktop-control",
   "displayName": "Desktop Control",
   "latest": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "publishedAt": "2026-02-06T00:00:00.000Z",
     "commit": "https://github.com/fffxln/openclaw-desktop-control"
   },
   "history": [
+    {
+      "version": "1.1.0",
+      "date": "2026-02-06",
+      "notes": "Accuracy overhaul: two-phase structured analysis prompt, pre-click coordinate validation (Step 3.5), keyboard-first action priority, state assertion replacing loose verification, 4-level recovery protocol (Step 5.5), per-app danger zone registry, keyboard-first navigation guide"
+    },
     {
       "version": "1.0.0",
       "date": "2026-02-06",

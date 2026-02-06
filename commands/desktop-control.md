@@ -36,23 +36,48 @@ For a specific display: `{baseDir}/scripts/desktop-control screencapture -x -D 1
 
 ## Step 3: Analyze
 
-Send the screenshot to Claude vision:
+Send the screenshot to Claude vision with structured two-phase analysis:
 
 ```
-Look at this screenshot. I need to [current step from the plan].
-1. What app is in the foreground?
-2. Where is [target element]? Give pixel coordinates (x, y).
-3. Does the screen contain sensitive content? (banking, passwords, credentials, private messages, API keys)
-4. What is the single best next action?
+TASK: I need to [current step from the plan].
+
+PHASE 1 — SCENE UNDERSTANDING:
+1. What app/view is in foreground?
+2. Map visible UI regions with approximate pixel bounds.
+3. Sensitive content check — if found, STOP.
+4. Describe the target element (label, shape, color, region).
+5. Danger zone check — any danger elements within 40px of target? (see Danger Zones in SKILL.md)
+
+PHASE 2 — LOCALIZATION:
+6. Target center coordinates (x, y).
+7. Target bounding box (x_min, y_min, x_max, y_max).
+8. Confidence: HIGH / MEDIUM / LOW.
+9. Keyboard alternative available?
+10. Recommended action (if LOW confidence or near danger zone, strongly prefer keyboard).
 ```
 
-If sensitive content is detected → stop and ask the user. Do not act.
+If CONFIDENCE is LOW or a danger zone is within 40px: use keyboard alternative. If none exists, take a region capture (`-R` flag) and re-analyze.
 
-If the target element is not visible → scroll and take a new screenshot. After 3 scroll attempts, stop and ask the user.
+## Step 3.5: Validate (Pre-Click Safety)
+
+Before any click action, verify:
+1. Coordinates fall within the expected UI region from Step 3
+2. List clickable elements within 30px in each direction — flag dangerous adjacencies
+3. Confirm Retina scale applied: "Raw (Xr,Yr) / Scale S = Click (Xc,Yc)"
+4. Click point is 5px+ inside element bounding box on all sides
+5. Distance to nearest danger zone element is > 30px
+
+If any check fails: use keyboard alternative or ask user.
 
 ## Step 4: Act
 
 Execute exactly one action per cycle. Do not chain multiple actions without verifying each one.
+
+**Priority order (prefer higher):**
+1. **Keyboard shortcut** — no coordinate risk (Cmd+Enter, Escape, etc.)
+2. **Search/filter + keyboard** — type to find, Enter to select (Cmd+F, Spotlight)
+3. **Tab navigation** — Tab through elements, Enter to activate
+4. **Mouse click** — least preferred, should pass Step 3.5 validation first
 
 ### Mouse (cliclick)
 
@@ -87,20 +112,32 @@ osascript -e 'tell application "AppName" to activate'
 
 After every action, add `sleep 0.5` minimum. For app launches, use `sleep 2`. For file saves/exports, use `sleep 1`.
 
-## Step 5: Verify
+## Step 5: Assert Expected State
 
-Take another screenshot immediately after the action. Check:
+Take a screenshot after the action. Perform explicit state assertion:
 
-1. Did the expected change occur?
-2. Did an unexpected dialog or popup appear? → handle it before continuing
-3. Is a loading state in progress? → `sleep 2`, screenshot again, up to 5 retries
+1. Does screen match the expected post-action state described in Step 3?
+2. Is the target element in its expected post-action state?
+3. Did any unwanted changes occur? (wrong window, unexpected modal, wrong view)
+4. Is the correct app/view still active?
 
-**If the action failed:**
-- Attempt 1: Recalculate coordinates from a fresh screenshot and retry
-- Attempt 2: Try an alternative approach (e.g., keyboard shortcut instead of click)
-- Attempt 3: Stop and report the failure to the user with a screenshot
+**Classification:**
+- **SUCCESS** — all checks pass → proceed to Step 6
+- **FAILURE** — enter Recovery Protocol (Step 5.5)
+- **DANGER** — unexpected modal/dialog/navigation that could cause data loss or unintended action → enter Recovery Protocol at Level 2+
 
-Do not attempt the same action more than 3 times.
+## Step 5.5: Recovery Protocol
+
+Escalation ladder (do not skip levels):
+
+1. **Level 1 — Soft:** Escape (3x), Cmd+Z. Screenshot. If recovered → resume from Step 2.
+2. **Level 2 — Navigation:** Cmd+W, Cmd+[, app-specific shortcuts. Screenshot. If recovered → resume.
+3. **Level 3 — App Reset:** Quit app, wait 2s, relaunch, navigate back. Resume from Step 2.
+4. **Level 4 — User Escalation:** Screenshot + full report to user. Wait for instructions.
+
+**DANGER classification:** start at Level 2. If an irreversible action has ALREADY occurred (call initiated, message sent, file deleted) → skip to Level 4 immediately. If a dialog appeared but nothing irreversible happened yet → start at Level 2. App-specific recovery patterns at Level 2 may include Escape — this is permitted.
+
+**Retry budget:** 5 retries total across all steps, then auto-escalate to Level 4.
 
 ## Step 6: Loop or Complete
 

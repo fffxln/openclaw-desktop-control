@@ -39,10 +39,18 @@ Add this repo's path to your `~/.openclaw/openclaw.json`:
 ## How It Works
 
 ```
-User request -> Plan -> Screenshot -> Vision analysis -> Action -> Verify -> Repeat
+Plan -> Capture -> Analyze -> Validate -> Act -> Assert -> Recover (if needed) -> Repeat
 ```
 
-The skill uses a **vision-action loop**: it captures a screenshot, sends it to Claude for analysis, executes one action (click, type, navigate), then verifies the result with another screenshot. This continues until the task is complete.
+The skill uses a **vision-action loop** with built-in safety checks:
+
+1. **Analyze** — Two-phase structured analysis: first understand the scene (regions, danger zones, sensitive content), then localize the target element with a confidence rating
+2. **Validate** — Pre-click safety check: verify coordinates are in the right region, check adjacent elements, confirm Retina scaling, ensure clearance from danger zones
+3. **Act** — Keyboard-first: prefer shortcuts and search over mouse clicks. Clicking is a last resort and must pass validation
+4. **Assert** — Explicit state assertion against the expected outcome, not just "did something change"
+5. **Recover** — If something goes wrong, a 4-level escalation ladder (Escape → navigation shortcuts → app reset → user escalation)
+
+**Keyboard-first principle:** Most documented misclick failures could have been avoided with keyboard shortcuts. The skill prefers `Cmd+F` over clicking chat rows, `Cmd+Enter` over clicking Post buttons, and `Escape` over clicking Cancel.
 
 **Why a helper app?**
 macOS requires Screen Recording and Accessibility permissions to be granted per-app. The helper runs as a proper `.app` bundle so it can receive its own TCC permissions, separate from Terminal or OpenClaw.
